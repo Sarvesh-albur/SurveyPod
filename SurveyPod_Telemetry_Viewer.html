@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SurveyPod Telemetry Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+body{font-family:Arial;margin:20px}
+.layout{display:grid;grid-template-columns:320px 1fr;gap:15px}
+.box{border:1px solid #ccc;padding:10px;border-radius:8px}
+#paramList{height:500px;overflow:auto;border:1px solid #ddd;padding:5px}
+label{display:block;margin:4px}
+</style>
+</head>
+<body>
+<h2>SURVEYPOD TELEMETRY VIEWER</h2>
+<input type="file" id="csv">
+
+<div class="layout">
+<div class="box">
+<h3>Parameters</h3>
+<input id="search" placeholder="Search parameter"><br><br>
+<button onclick="selectAll()">Select All</button>
+<button onclick="clearAll()">Clear All</button>
+<div id="paramList"></div>
+<br>
+<button onclick="exportPDF()">Export PDF</button>
+</div>
+
+<div class="box">
+<button onclick="resetZoom()">Reset Zoom</button>
+<canvas id="chart"></canvas>
+</div>
+</div>
+
+<script>
+let rows=[];
+let numeric=[];
+let chart=null;
+let fileName='';
+let podId='';
+let logDate='';
+
+document.getElementById('csv').addEventListener('change',e=>{
+ const f=e.target.files[0];
+ if(!f)return;
+
+ fileName=f.name;
+
+ const p=f.name.replace('.csv','').split('#');
+ podId=p[1]||'Unknown';
+ logDate=p[2]||'';
+
+ Papa.parse(f,{
+   header:true,
+   skipEmptyLines:true,
+   complete:r=>{
+      rows=r.data;
+      detect();
+      buildList();
+      draw();
+   }
+ });
+});
+
+function detect(){
+ numeric=[];
+ Object.keys(rows[0]||{}).forEach(c=>{
+   if(rows.some(r=>!isNaN(parseFloat(r[c])))) numeric.push(c);
+ });
+}
+
+function buildList(){
+ const div=document.getElementById('paramList');
+ div.innerHTML='';
+ numeric.forEach(c=>{
+  div.innerHTML+=`<label class='p'><input type='checkbox' value='${c}' onchange='draw()'> ${c}</label>`;
+ });
+}
+
+document.getElementById('search').addEventListener('input',e=>{
+ let q=e.target.value.toLowerCase();
+ document.querySelectorAll('.p').forEach(x=>{
+  x.style.display=x.textContent.toLowerCase().includes(q)?'block':'none';
+ });
+});
+
+function draw(){
+ let sel=[...document.querySelectorAll('#paramList input:checked')].map(x=>x.value);
+
+ if(chart) chart.destroy();
+
+ chart=new Chart(document.getElementById('chart'),{
+  type:'line',
+  data:{
+   labels:rows.map((_,i)=>i+1),
+   datasets:sel.map((p,i)=>({
+     label:p,
+     data:rows.map(r=>parseFloat(r[p])),
+     borderWidth:1
+   }))
+  },
+  options:{
+   responsive:true,
+   plugins:{
+    zoom:{
+      zoom:{wheel:{enabled:true},drag:{enabled:true},mode:'x'},
+      pan:{enabled:true,mode:'x'}
+    }
+   }
+  }
+ });
+}
+
+function selectAll(){
+ document.querySelectorAll('#paramList input').forEach(x=>x.checked=true);
+ draw();
+}
+
+function clearAll(){
+ document.querySelectorAll('#paramList input').forEach(x=>x.checked=false);
+ draw();
+}
+
+function resetZoom(){
+ if(chart) chart.resetZoom();
+}
+
+function stats(col){
+ let v=rows.map(r=>parseFloat(r[col])).filter(x=>!isNaN(x));
+ if(!v.length) return null;
+ return {
+   min:Math.min(...v),
+   max:Math.max(...v),
+   avg:v.reduce((a,b)=>a+b,0)/v.length
+ };
+}
+
+async function exportPDF(){
+ const {jsPDF}=window.jspdf;
+ const pdf=new jsPDF();
+
+ pdf.text("SURVEYPOD REPORT",10,15);
+ pdf.text("LOG INFORMATION",10,25);
+
+ pdf.text("SurveyPod ID : "+podId,10,40);
+ pdf.text("File Name : "+fileName,10,50);
+ pdf.text("Rover Time : N/A min",10,60);
+ pdf.text("Base Time : N/A min",100,60);
+ pdf.text("Date : "+logDate,10,70);
+
+ pdf.text("Parameter",10,90);
+ pdf.text("Min",100,90);
+ pdf.text("Max",140,90);
+ pdf.text("Avg",180,90);
+
+ let reportParams=[
+ "usedSatellites","cycleCount","Ts1","core_temp","fixMode","Rssi",
+ "cpu_usage","ram_usage","rtcmRecieving","rtcmSending","loraAirRate",
+ "BATTcell1Volt","BATTcell2Volt","BATTcell1Curr","BATTcell2Curr",
+ "BATTbattFullMah","BATTbattStateOfCharge","battStateOfHealth",
+ "BATTmaxerror","Tint"
+ ];
+
+ let y=100;
+
+ reportParams.forEach(p=>{
+   let s=stats(p);
+   if(!s) return;
+   pdf.text(p,10,y);
+   pdf.text(s.min.toFixed(2),100,y);
+   pdf.text(s.max.toFixed(2),140,y);
+   pdf.text(s.avg.toFixed(2),180,y);
+   y+=6;
+ });
+
+ pdf.save("SurveyPod_Report.pdf");
+}
+</script>
+</body>
+</html>
